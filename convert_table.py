@@ -5,30 +5,6 @@ import os
 import ast
 import argparse
 
-def openAI_api_call(content):
-    completion = openai.ChatCompletion.create(
-    model = 'gpt-4',
-    messages = [
-        {'role': 'user', 'content': content}
-    ],
-    temperature = 0.9  
-    )
-    response = completion['choices'][0]['message']['content']
-    return response
-
-def get_matching_columns_name(column_name,matching_columns):
-    content = f"Map this columns name [{column_name}] to the template columns: [{', '.join(matching_columns)}].Give same exact column name as in template columns list .Just Give single output complete column name nothing else. Try to return the first column name that matches"
-    completion = openai.ChatCompletion.create(
-  model = 'gpt-4',
-  messages = [
-    {'role': 'user', 'content': content}
-  ],
-  temperature = 0.9  
-)
-    response = completion['choices'][0]['message']['content']
-    return response.strip()
-def clean_string(input_string):
-    return re.sub(r'[^a-zA-Z0-9]', '', input_string)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process CSV files with GPT-4')
@@ -41,52 +17,40 @@ if __name__ == "__main__":
         openai.api_key = api_key
 
     template_df = pd.read_csv(args.template)
-    table_A_df = pd.read_csv(args.template)
-    template_df_columns = list(template_df.columns)
-    table_A_df_columns = list(table_A_df.columns)
-
-    template_df_columns = list(template_df.columns)
-    table_A_df_columns = list(table_A_df.columns)
-    # Mapping of column names from table A to the template
-    template_column_to_input_columns = {}
-
-    # Iterate through table A columns
-    for column_A in template_df_columns:
-        # Find the best matching column name in the template using GPT-4
-        best_match = get_matching_columns_name(column_A, table_A_df_columns)
-        template_column_to_input_columns[column_A] = best_match
-    template_column_to_input_columns
-
+    table_A_df = pd.read_csv(args.source)
+    template_df_data = template_df.values.tolist()
+    template_df_data.insert(0,list(template_df.columns))
+    table_A_df_data = table_A_df.values.tolist()
+    table_A_df_data.insert(0,list(table_A_df.columns))
+    content = f"I am giving sample values from 2 CSV Files. Template Table {template_df_data}. Table A {table_A_df_data}. Output a dictionary which maps column names of Template Table to Table A. Output should only contain python dictionary nothing else. No code"
+    completion = openai.ChatCompletion.create(
+    model = 'gpt-4',#'gpt-3.5-turbo', #gpt-4
+    messages = [
+            {'role': 'user', 'content': content}
+        ],
+        temperature = 0.9  
+    )
+    response1 = completion['choices'][0]['message']['content']
+    column_mapping = ast.literal_eval(response1)
+    table_A_df_data  = table_A_df[list(column_mapping.values())].values.tolist()
+    table_A_df_data.insert(0,list( table_A_df[list(column_mapping.values())].columns))
+    content = f"I am giving sample values from 2 CSV Files. Template Table {template_df_data}. Table A {table_A_df_data}. This dictionary maps Template Table to Table A {column_mapping}. Go through values of mapped colums.For columns where value formatting is different, Output a dictionary which maps unique values of Table A to Template Table. The key of dictionary should be column name and value is dictionary which maps values. No Code, No Text."
+    completion = openai.ChatCompletion.create(
+    model = 'gpt-4',#'gpt-3.5-turbo', #gpt-4
+    messages = [
+            {'role': 'user', 'content': content}
+        ],
+        temperature = 0.9  
+        )
+    response2 = completion['choices'][0]['message']['content']
+    response2_dict = ast.literal_eval(response2)
     target_df = pd.DataFrame(columns = [list(template_df.columns)])
-    numeric_columns = template_df.select_dtypes(include=['int', 'float']).columns
-    total_columns = list(template_df.columns)
-    for current_column in numeric_columns:
-        target_df[current_column] = table_A_df[template_column_to_input_columns[current_column]]
-        target_df[current_column] = target_df[current_column].astype(template_df[current_column].dtype)
-        total_columns.remove(current_column)
-    # Add Date Logic here
-    content = f"Just return column name, without quotes, which most matches with Date {total_columns}."
-    date_response = openAI_api_call(content)
-    content = f"Input date is {template_df[date_response].iloc[0]} whose format is Date/Month/Year. 2nd Date is {table_A_df[template_column_to_input_columns[date_response]].iloc[0]}. Give the python date format for 2nd Date. Only give date format string in output"
-    date_format_response = openAI_api_call(content)
-    date_format_response= date_format_response.strip('"')
-    target_df[date_response] = pd.to_datetime(table_A_df[template_column_to_input_columns[date_response]],format= date_format_response).dt.strftime('%d-%m-%Y')
-    total_columns.remove(date_response)
-    # Handling Policy Number
-    content = f"Just return column name, without quotes, which most matches with Policy Number {total_columns}."
-    policy_num_response = openAI_api_call(content)
-    if table_A_df[template_column_to_input_columns[policy_num_response]].iloc[0].isalnum() == False:
-        target_df[policy_num_response] = table_A_df[template_column_to_input_columns[policy_num_response]].map(clean_string)
-    total_columns.remove(policy_num_response)
-    # Handling Policy Plan Name
-    content = f"Just return column name, without quotes, which most matches with Plan {total_columns}."
-    plan_name_response = openAI_api_call(content)
-    content = f"Just give dictionary to map [{list(table_A_df[template_column_to_input_columns[plan_name_response]].unique())} to [{list(template_df[plan_name_response].unique())}]]. Dont't add any \n"
-    plane_name_mapping_dict = ast.literal_eval(openAI_api_call(content))
-    target_df[plan_name_response] = table_A_df[template_column_to_input_columns[plan_name_response]].map(plane_name_mapping_dict)
-    total_columns.remove(plan_name_response)
-    content = f"Just return column name, without quotes, which most matches with Employe Name {total_columns}."
-    name_response = openAI_api_call(content)
-    target_df[name_response] = table_A_df[template_column_to_input_columns[name_response]]
-    total_columns.remove(name_response)
+    for column in list(column_mapping.keys()):
+        if column_mapping[column] not in list(response2_dict.keys()):
+            target_df[column] = table_A_df[column_mapping[column]]
+    for column in list(column_mapping.keys()):
+        if column_mapping[column] in list(response2_dict.keys()):
+            target_df[column] = table_A_df[column_mapping[column]].map(response2_dict[column_mapping[column]])
+
+
     target_df.to_csv(args.target,index=False)
